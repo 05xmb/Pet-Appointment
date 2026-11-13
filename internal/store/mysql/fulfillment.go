@@ -168,6 +168,9 @@ func recordTransition(ctx context.Context, tx *sql.Tx, b booking.Booking, actorI
 	if err != nil {
 		return booking.Booking{}, fulfillment.Event{}, err
 	}
+	if err := writeAudit(ctx, tx, actorID, "booking", b.ID, string(eventType), string(b.Status), string(next), reason); err != nil {
+		return booking.Booking{}, fulfillment.Event{}, err
+	}
 	eventID, err := insert.LastInsertId()
 	if err != nil {
 		return booking.Booking{}, fulfillment.Event{}, err

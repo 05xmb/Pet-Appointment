@@ -17,6 +17,7 @@ import (
 	"github.com/05xmb/Pet-Appointment/internal/fulfillment"
 	"github.com/05xmb/Pet-Appointment/internal/payment"
 	"github.com/05xmb/Pet-Appointment/internal/reporting"
+	"github.com/05xmb/Pet-Appointment/internal/slot"
 )
 
 const sessionCookie = "__Host-pet_session"
@@ -34,6 +35,7 @@ type handlerDependencies struct {
 	cancellationService *cancellation.Service
 	fulfillmentService  *fulfillment.Service
 	reportingService    *reporting.Service
+	slotService         *slot.Service
 }
 
 func WithBookingService(service *booking.Service) HandlerOption {
@@ -54,6 +56,10 @@ func WithFulfillmentService(service *fulfillment.Service) HandlerOption {
 
 func WithReportingService(service *reporting.Service) HandlerOption {
 	return func(deps *handlerDependencies) { deps.reportingService = service }
+}
+
+func WithSlotService(service *slot.Service) HandlerOption {
+	return func(deps *handlerDependencies) { deps.slotService = service }
 }
 
 func NewHandler(service *auth.Service, clock Clock, options ...HandlerOption) http.Handler {
@@ -184,7 +190,90 @@ func NewHandler(service *auth.Service, clock Clock, options ...HandlerOption) ht
 	if deps.reportingService != nil {
 		registerReportingHandlers(mux, service, deps.reportingService, shanghai)
 	}
+	if deps.slotService != nil {
+		registerSlotHandlers(mux, service, clock, deps.slotService, shanghai)
+	}
 	return http.NewCrossOriginProtection().Handler(mux)
+}
+
+func registerSlotHandlers(mux *http.ServeMux, authService *auth.Service, clock Clock, slotService *slot.Service, loc *time.Location) {
+	mux.HandleFunc("GET /slots", func(w http.ResponseWriter, r *http.Request) {
+		if !requireTLS(w, r) {
+			return
+		}
+		identity, ok := sessionIdentity(w, r, authService)
+		if !ok {
+			return
+		}
+		from, to, date, err := reportDayRange(r.URL.Query().Get("date"), loc)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		result, err := slotService.List(r.Context(), identity.StoreID, from, to)
+		if err != nil {
+			http.Error(w, "slots unavailable", http.StatusInternalServerError)
+			return
+		}
+		writeReporting(w, http.StatusOK, map[string]any{"date": date, "slots": result})
+	})
+
+	mux.HandleFunc("POST /slots", func(w http.ResponseWriter, r *http.Request) {
+		if !requireTLS(w, r) {
+			return
+		}
+		identity, ok := sessionIdentity(w, r, authService)
+		if !ok {
+			return
+		}
+		if identity.Role != "manager" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid form", http.StatusBadRequest)
+			return
+		}
+		projectID, err := strconv.ParseInt(r.PostForm.Get("project_id"), 10, 64)
+		if err != nil || projectID <= 0 {
+			http.Error(w, "invalid project", http.StatusBadRequest)
+			return
+		}
+		start, err := time.ParseInLocation("2006-01-02T15:04", r.PostForm.Get("start_at"), loc)
+		if err != nil {
+			http.Error(w, "invalid start time", http.StatusBadRequest)
+			return
+		}
+		end, err := time.ParseInLocation("2006-01-02T15:04", r.PostForm.Get("end_at"), loc)
+		if err != nil {
+			http.Error(w, "invalid end time", http.StatusBadRequest)
+			return
+		}
+		capacity, err := strconv.Atoi(r.PostForm.Get("capacity"))
+		if err != nil {
+			http.Error(w, "invalid capacity", http.StatusBadRequest)
+			return
+		}
+		now, err := clock.ClockNow(r.Context(), time.Now())
+		if err != nil {
+			http.Error(w, "clock unavailable", http.StatusInternalServerError)
+			return
+		}
+		result, err := slotService.Create(r.Context(), identity.ID, identity.StoreID, projectID, start, end, now, capacity)
+		if err != nil {
+			status := http.StatusInternalServerError
+			switch {
+			case errors.Is(err, slot.ErrInvalidTime), errors.Is(err, slot.ErrInvalidCapacity):
+				status = http.StatusBadRequest
+			case errors.Is(err, slot.ErrNotFound):
+				status = http.StatusNotFound
+			}
+			http.Error(w, err.Error(), status)
+			return
+		}
+		writeReporting(w, http.StatusCreated, result)
+	})
 }
 
 func registerReportingHandlers(mux *http.ServeMux, authService *auth.Service, reportingService *reporting.Service, loc *time.Location) {

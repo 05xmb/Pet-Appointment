@@ -281,11 +281,45 @@ func TestClosedDatabaseRejectsTransactionalBusinessOperations(t *testing.T) {
 			_, err := store.DailySummary(ctx, 1, now, now.Add(time.Hour), "2026-11-13")
 			return err
 		}},
+		{"create slot", func() error {
+			_, err := store.Create(ctx, 8, 1, 1, now.Add(time.Hour), now.Add(2*time.Hour), 3)
+			return err
+		}},
+		{"list slots", func() error { _, err := store.List(ctx, 1, now, now.Add(time.Hour)); return err }},
 	}
 	for _, check := range checks {
 		if err := check.call(); err == nil {
 			t.Errorf("%s unexpectedly succeeded", check.name)
 		}
+	}
+}
+
+func TestSlotRepositoryRejectsMissingProjectAndListsEmptyRange(t *testing.T) {
+	db, _ := testDatabase(t)
+	ctx := context.Background()
+	store := New(db)
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 11, 13, 8, 0, 0, 0, time.UTC)
+	if err := store.SeedTeachingData(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(ctx, 8, 1, 99, base.Add(time.Hour), base.Add(2*time.Hour), 3); err == nil {
+		t.Fatal("missing project accepted")
+	}
+	items, err := store.List(ctx, 1, base.Add(48*time.Hour), base.Add(49*time.Hour))
+	if err != nil || len(items) != 0 {
+		t.Fatalf("items=%+v error=%v", items, err)
+	}
+	if _, err := db.ExecContext(ctx, `ALTER TABLE slots MODIFY capacity VARCHAR(8) NOT NULL`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE slots SET capacity = 'bad' WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.List(ctx, 1, base, base.Add(24*time.Hour)); err == nil {
+		t.Fatal("invalid stored capacity was accepted")
 	}
 }
 

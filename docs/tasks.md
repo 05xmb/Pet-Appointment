@@ -1,6 +1,6 @@
 # 题目 02 任务规划
 
-状态：待学生审核的任务清单。题目 02 的业务规则见 `docs/requirements.md`，已确认决策见 `AGENTS.md`。此清单不是测试、部署或教师评分的完成记录。
+状态：P01–A01 的仓库内实现和非部署验收已完成；REL01 的正式自动部署与 G01 的教师评分/视频提交待外部执行。题目规则见 `docs/requirements.md`，证据见 `docs/acceptance-final-nondeployment.md`。
 
 ## 顺序与门禁
 
@@ -29,3 +29,9 @@
 最低检查命令以实际 `go.mod` 和包名为准：`gofmt`、`go vet ./...`、`go test ./...`、`go test -race ./...`（共享并发逻辑）、`go test ./... -coverprofile=coverage.out`、`go tool cover -func=coverage.out`。整体及每个核心业务包分别检查，不以集成测试覆盖率替代单元测试。
 
 阶段提交只记录真实产出：需求、原型、计划、开发、测试、验收分别留版本；本作业无飞书工作项编号或 Meegle 方式的差异按 `AGENTS.md` 说明，不伪造编号。正式部署仅在 PR 合并后执行，不以本地验收或教师评分代替发布证据。
+
+## 当前完成状态
+
+- P01–P03、DEV01–DEV06、T01、A01：完成，最终证据见 `docs/acceptance-final-nondeployment.md` 与 `docs/coverage-2026-11-13.md`。
+- REL01：PR #1 已合并；正式 CI/CD、可信 HTTPS 部署、完整线上冒烟和回退演练未完成。
+- G01：教师评分 Skill 尚未提供；会话平台导出、讲解视频和班级群提交由学生执行。

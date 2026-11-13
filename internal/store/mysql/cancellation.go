@@ -37,6 +37,9 @@ func (s *Store) CancelConfirmed(ctx context.Context, ownerID, bookingID int64, n
 		return booking.Booking{}, err
 	}
 	b.Status = booking.StatusCancelled
+	if err := writeAudit(ctx, tx, ownerID, "booking", bookingID, "cancelled_early", string(booking.StatusConfirmed), string(booking.StatusCancelled), "full refund pending"); err != nil {
+		return booking.Booking{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return booking.Booking{}, err
 	}
@@ -50,6 +53,9 @@ func (s *Store) RequestCancellation(ctx context.Context, ownerID, bookingID int6
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return cancellation.Request{}, err
+	}
+	if err := writeAudit(ctx, tx, ownerID, "booking", bookingID, "cancellation_requested", string(booking.StatusConfirmed), string(booking.StatusCancelReview), reason); err != nil {
 		return cancellation.Request{}, err
 	}
 	defer tx.Rollback()
@@ -141,6 +147,9 @@ func (s *Store) ReviewCancellation(ctx context.Context, supportID, requestID int
 			return booking.Booking{}, err
 		}
 		b.Status = booking.StatusCancelled
+		if err := writeAudit(ctx, tx, supportID, "booking", bookingID, "cancellation_approved", string(booking.StatusCancelReview), string(booking.StatusCancelled), "full refund pending"); err != nil {
+			return booking.Booking{}, err
+		}
 	} else {
 		if _, err := tx.ExecContext(ctx, `UPDATE bookings SET status = 'CONFIRMED' WHERE id = ? AND status = 'CANCEL_REVIEW'`, bookingID); err != nil {
 			return booking.Booking{}, err
@@ -149,6 +158,9 @@ func (s *Store) ReviewCancellation(ctx context.Context, supportID, requestID int
 			return booking.Booking{}, err
 		}
 		b.Status = booking.StatusConfirmed
+		if err := writeAudit(ctx, tx, supportID, "booking", bookingID, "cancellation_rejected", string(booking.StatusCancelReview), string(booking.StatusConfirmed), ""); err != nil {
+			return booking.Booking{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return booking.Booking{}, err
@@ -181,10 +193,14 @@ func (s *Store) ApplyRefundResult(ctx context.Context, refundID int64, success b
 	if success {
 		newStatus = refund.StatusSuccess
 	}
+	oldStatus := result.Status
 	if _, err := tx.ExecContext(ctx, `UPDATE refunds SET status = ? WHERE id = ? AND status IN ('PENDING', 'FAILED')`, newStatus, refundID); err != nil {
 		return refund.Refund{}, err
 	}
 	result.Status = newStatus
+	if err := writeAudit(ctx, tx, 0, "refund", refundID, "callback", string(oldStatus), string(newStatus), ""); err != nil {
+		return refund.Refund{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return refund.Refund{}, err
 	}
