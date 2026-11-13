@@ -18,6 +18,7 @@ import (
 	"github.com/05xmb/Pet-Appointment/internal/httpapi"
 	"github.com/05xmb/Pet-Appointment/internal/payment"
 	"github.com/05xmb/Pet-Appointment/internal/reporting"
+	"github.com/05xmb/Pet-Appointment/internal/slot"
 	mysqlstore "github.com/05xmb/Pet-Appointment/internal/store/mysql"
 	"github.com/go-sql-driver/mysql"
 	"golang.org/x/term"
@@ -131,7 +132,8 @@ func runWithPrompt(args []string, prompt func(string) ([]byte, error)) error {
 			httpapi.WithPaymentService(payment.NewService(store, []byte(cfg.paymentSecret))),
 			httpapi.WithCancellationService(cancellation.NewServiceWithSecret(store, []byte(cfg.paymentSecret))),
 			httpapi.WithFulfillmentService(fulfillment.NewService(store)),
-			httpapi.WithReportingService(reporting.NewService(store)))
+			httpapi.WithReportingService(reporting.NewService(store)),
+			httpapi.WithSlotService(slot.NewService(store)))
 		server := newServer(cfg, handler)
 		return server.ListenAndServeTLS(cfg.cert, cfg.key)
 	}

@@ -65,6 +65,12 @@ func TestCLIInitializesAndRequiresAllPasswordsBeforeServing(t *testing.T) {
 	if err := run([]string{"serve"}); err == nil || !strings.Contains(err.Error(), "set passwords") {
 		t.Fatalf("unconfigured serve error=%v", err)
 	}
+	if err := runWithPrompt([]string{"set-password", "owner1"}, func(string) ([]byte, error) { return nil, errors.New("prompt failed") }); err == nil {
+		t.Fatal("password prompt failure ignored")
+	}
+	if err := runWithPrompt([]string{"set-password", "missing"}, func(string) ([]byte, error) { return []byte("fixture-secret"), nil }); err == nil {
+		t.Fatal("missing account password update accepted")
+	}
 	for _, name := range []string{"owner1", "owner2", "owner3", "owner4", "frontdesk", "groomer", "support", "manager"} {
 		prompt := func(username string) ([]byte, error) { return []byte(username + "-fixture-secret"), nil }
 		if err := runWithPrompt([]string{"set-password", name}, prompt); err != nil {

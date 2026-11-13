@@ -19,3 +19,19 @@ func TestDashboardPageProvidesLoginQueriesAndActions(t *testing.T) {
 		t.Fatalf("dashboard subpath status=%d", notFound.Code)
 	}
 }
+
+func TestDashboardExposesEveryRoleWorkflow(t *testing.T) {
+	w := httptest.NewRecorder()
+	serveDashboard(w, httptest.NewRequest(http.MethodGet, "https://example.test/", nil))
+	body := w.Body.String()
+	for _, marker := range []string{
+		"slotForm", "bookingForm", "paymentForm", "reviewForm", "refundForm",
+		"logout", "/slots", "/bookings", "/payments", "/cancellation-requests/",
+		"/refunds/callback", "check-in", "service/start", "service/complete", "no-show",
+		"renderTable", "daily-summary",
+	} {
+		if !strings.Contains(body, marker) {
+			t.Errorf("dashboard missing %q", marker)
+		}
+	}
+}

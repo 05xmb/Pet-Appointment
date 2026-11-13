@@ -69,6 +69,26 @@ func (s *Store) Migrate(ctx context.Context) error {
 			CONSTRAINT slots_store_fk FOREIGN KEY (store_id) REFERENCES stores(id),
 			CONSTRAINT slots_project_fk FOREIGN KEY (project_id) REFERENCES projects(id)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+		`CREATE TABLE IF NOT EXISTS slot_sequence (
+			id TINYINT NOT NULL PRIMARY KEY,
+			next_id BIGINT NOT NULL
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+		`INSERT INTO slot_sequence (id, next_id)
+			SELECT 1, GREATEST(COALESCE(MAX(id), 0) + 1, 4) FROM slots
+			ON DUPLICATE KEY UPDATE next_id = GREATEST(next_id, VALUES(next_id))`,
+		`CREATE TABLE IF NOT EXISTS audit_logs (
+			id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+			actor_id BIGINT NOT NULL DEFAULT 0,
+			entity_type VARCHAR(32) NOT NULL,
+			entity_id BIGINT NOT NULL,
+			action VARCHAR(48) NOT NULL,
+			from_state VARCHAR(32) NOT NULL DEFAULT '',
+			to_state VARCHAR(32) NOT NULL DEFAULT '',
+			detail VARCHAR(255) NOT NULL DEFAULT '',
+			created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+			INDEX audit_entity_time (entity_type, entity_id, created_at),
+			INDEX audit_actor_time (actor_id, created_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 		`CREATE TABLE IF NOT EXISTS bookings (
 			id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
 			slot_id BIGINT NOT NULL,

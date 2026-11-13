@@ -72,6 +72,9 @@ func (s *Store) CreatePending(ctx context.Context, ownerID, petID, slotID int64,
 	if err := tx.QueryRowContext(ctx, `SELECT created_at, updated_at FROM bookings WHERE id = ?`, id).Scan(&created.CreatedAt, &created.UpdatedAt); err != nil {
 		return booking.Booking{}, err
 	}
+	if err := writeAudit(ctx, tx, ownerID, "booking", id, "created", "", string(booking.StatusPendingPayment), ""); err != nil {
+		return booking.Booking{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return booking.Booking{}, err
 	}
@@ -101,6 +104,9 @@ func (s *Store) CloseExpired(ctx context.Context, bookingID int64, now time.Time
 		return booking.Booking{}, err
 	}
 	b.Status = booking.StatusClosed
+	if err := writeAudit(ctx, tx, 0, "booking", bookingID, "expired", string(booking.StatusPendingPayment), string(booking.StatusClosed), ""); err != nil {
+		return booking.Booking{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return booking.Booking{}, err
 	}
@@ -130,6 +136,9 @@ func (s *Store) CancelPending(ctx context.Context, ownerID, bookingID int64) (bo
 		return booking.Booking{}, err
 	}
 	b.Status = booking.StatusCancelled
+	if err := writeAudit(ctx, tx, ownerID, "booking", bookingID, "cancelled_unpaid", string(booking.StatusPendingPayment), string(booking.StatusCancelled), ""); err != nil {
+		return booking.Booking{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return booking.Booking{}, err
 	}
