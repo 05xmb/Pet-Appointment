@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>题目 02 · 宠物门店业务原型</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, "Microsoft YaHei", sans-serif; color: #233039; background: #f6f8f7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header { background: #fff; border-bottom: 1px solid #dbe2df; padding: 24px max(20px, calc((100vw - 1180px) / 2)); }
+    h1 { font-size: 24px; margin: 0 0 8px; }
+    h2 { font-size: 18px; margin: 0 0 16px; }
+    p { margin: 0; line-height: 1.6; }
+    .muted { color: #64747a; font-size: 13px; }
+    .warning { color: #8a4e16; }
+    .shell { max-width: 1180px; margin: 0 auto; padding: 20px; }
+    nav { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid #cbd8d3; margin-bottom: 20px; }
+    nav button { border: 0; border-bottom: 3px solid transparent; background: transparent; border-radius: 0; padding: 12px 16px; white-space: nowrap; color: #53656b; }
+    nav button.active { color: #126657; border-bottom-color: #126657; font-weight: 700; }
+    section { background: #fff; border: 1px solid #dbe2df; padding: 20px; margin: 0 0 16px; }
+    .toolbar, .formrow, .actions, .metrics { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+    .metrics { align-items: stretch; }
+    .metric { min-width: 145px; flex: 1; border-left: 3px solid #147364; padding: 8px 12px; background: #f3f8f6; }
+    .metric strong { display: block; font-size: 20px; margin-top: 4px; }
+    label { display: grid; gap: 5px; font-size: 13px; color: #42555b; }
+    input, select, textarea, button { font: inherit; }
+    input, select, textarea { border: 1px solid #b9c8c3; border-radius: 4px; padding: 9px 10px; background: #fff; color: #24323a; max-width: 100%; }
+    textarea { min-width: min(360px, 100%); min-height: 72px; }
+    button { border: 1px solid #126657; border-radius: 4px; padding: 8px 11px; background: #126657; color: #fff; cursor: pointer; }
+    button.secondary { color: #126657; background: #fff; }
+    button.danger { border-color: #a33f32; background: #a33f32; }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    .table-wrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 14px; }
+    th, td { text-align: left; vertical-align: top; border-bottom: 1px solid #e1e8e4; padding: 12px 10px; }
+    th { background: #f3f6f5; color: #53666a; font-size: 12px; }
+    td .actions { align-items: center; gap: 5px; }
+    td button { font-size: 12px; padding: 6px 8px; }
+    .status { display: inline-block; border: 1px solid #b7c7c1; background: #edf4f0; border-radius: 3px; padding: 3px 6px; white-space: nowrap; }
+    .notice { padding: 12px 14px; border-left: 3px solid #c77b28; background: #fff7e8; margin-bottom: 16px; min-height: 44px; }
+    .notice.error { border-left-color: #a33f32; background: #fff1ef; }
+    .log { max-height: 170px; overflow-y: auto; padding-left: 20px; line-height: 1.7; font-size: 13px; }
+    @media (max-width: 640px) {
+      header { padding: 20px; } .shell { padding: 12px; } section { padding: 14px; }
+      nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      nav button { min-width: 0; padding: 12px 6px; }
+      .formrow > label, .formrow > button { width: 100%; } input, select { width: 100%; }
+      .table-wrap::before { content: "表格可左右滑动查看完整列"; display: block; padding: 6px 0; color: #64747a; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>宠物门店 · 预约业务原型</h1>
+    <p class="muted">题目 02 / 单门店洗护 / ¥99.00。仅用于需求与页面状态演示：内存数据、模拟角色与支付，不是业务实现或验收结果。</p>
+  </header>
+  <main class="shell">
+    <nav id="roles" aria-label="角色工作台"></nav>
+    <div id="notice" class="notice">选择角色，从发布时段、预约付款到日清依次操作。时间可用教学时钟推进。</div>
+    <section>
+      <div class="toolbar">
+        <span>原型时钟（Asia/Shanghai）：<strong id="clock"></strong></span>
+        <button type="button" class="secondary" onclick="advance(5)">前进 5 分钟</button>
+        <button type="button" class="secondary" onclick="advance(120)">前进 2 小时</button>
+        <span class="muted">仅本页内存生效；正式系统按 D07 持久化教学时钟。</span>
+      </div>
+    </section>
+    <div id="view"></div>
+    <section><h2>操作记录</h2><ol id="events" class="log"></ol></section>
+  </main>
+  <script>
+    const title = { owner: "宠物主人", desk: "前台", worker: "服务人员", support: "客服", manager: "店长" };
+    const businessTimeZone = "Asia/Shanghai";
+    const base = new Date();
+    base.setSeconds(0, 0);
+    const addMin = (date, n) => new Date(date.getTime() + n * 60000);
+    const stamp = date => date.toLocaleString("zh-CN", { hour12: false, timeZone: businessTimeZone });
+    const businessParts = new Intl.DateTimeFormat("en-US", { timeZone: businessTimeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    const localInput = date => {
+      const parts = Object.fromEntries(businessParts.formatToParts(date).map(part => [part.type, part.value]));
+      return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+    };
+    const parseBusinessInput = value => {
+      const guess = new Date(`${value}Z`);
+      if (Number.isNaN(guess.getTime())) return guess;
+      const offset = new Date(`${localInput(guess)}Z`).getTime() - guess.getTime();
+      return new Date(guess.getTime() - offset);
+    };
+    const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    const users = [
+      { id: 1, name: "用户甲", pet: "团团" }, { id: 2, name: "用户乙", pet: "豆豆" },
+      { id: 3, name: "用户丙", pet: "雪球" }, { id: 4, name: "用户丁", pet: "米粒" }
+    ];
+    const state = {
+      role: "owner", user: 1, staff: "local", offset: 0, nextSlot: 4, nextBooking: 1, day: localInput(addMin(base, 180)).slice(0, 10),
+      slots: [180, 240, 300].map((m, i) => ({ id: i + 1, start: addMin(base, m), end: addMin(base, m + 60), cap: 3 })),
+      bookings: [], events: []
+    };
+    const now = () => addMin(base, state.offset);
+    const slotOf = booking => state.slots.find(slot => slot.id === booking.slotId);
+    const bookingOf = id => state.bookings.find(booking => booking.id === Number(id));
+    const occupied = slotId => state.bookings.filter(b => b.slotId === slotId && !["CLOSED", "CANCELLED"].includes(b.status)).length;
+    const status = { PENDING_PAYMENT: "待付款", CONFIRMED: "已确认", CANCEL_REVIEW: "取消待审", CANCELLED: "已取消", CLOSED: "超时关闭", CHECKED_IN: "已核销", IN_SERVICE: "服务中", COMPLETED: "已完成", NO_SHOW: "未到店" };
+    const refund = { NONE: "无", PENDING: "待退款", FAILED: "退款失败", SUCCESS: "退款成功" };
+    const money = amount => `¥${(amount / 100).toFixed(2)}`;
+    const refundInfo = booking => `${refund[booking.refund]}${booking.refundAmount ? ` · ${money(booking.refundAmount)}` : ""}`;
+    function notify(message, error = false) {
+      const box = document.getElementById("notice");
+      box.textContent = message;
+      box.classList.toggle("error", error);
+      state.events.unshift(`${stamp(now())} · ${message}`);
+      renderLog();
+    }
+    function renderLog() { document.getElementById("events").innerHTML = state.events.slice(0, 25).map(e => `<li>${esc(e)}</li>`).join("") || "<li>尚无操作</li>"; }
+    function expire() {
+      for (const b of state.bookings) if (b.status === "PENDING_PAYMENT" && now() >= b.expires) {
+        b.status = "CLOSED";
+        state.events.unshift(`${stamp(now())} · 预约 #${b.id} 未付款超时，释放名额`);
+      }
+    }
+    function advance(minutes) { state.offset += minutes; expire(); notify(`教学时钟前进 ${minutes} 分钟`); render(); }
+    function switchRole(role) { state.role = role; render(); }
+    function slotOptions() { return state.slots.map(s => `<option value="${s.id}">#${s.id} ${stamp(s.start)}—${stamp(s.end)} · 剩余 ${Math.max(0, s.cap - occupied(s.id))}</option>`).join(""); }
+    function table(rows, headings) {
+      return `<div class="table-wrap"><table><thead><tr>${headings.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("") || `<tr><td colspan="${headings.length}" class="muted">暂无记录</td></tr>`}</tbody></table></div>`;
+    }
+    function render() {
+      document.getElementById("clock").textContent = stamp(now());
+      document.getElementById("roles").innerHTML = Object.entries(title).map(([key, value]) => `<button type="button" class="${key === state.role ? "active" : ""}" onclick="switchRole('${key}')">${value}</button>`).join("");
+      document.getElementById("view").innerHTML = ({ owner: ownerView, desk: deskView, worker: workerView, support: supportView, manager: managerView })[state.role]();
+      renderLog();
+    }
+    function ownerView() {
+      const person = users.find(u => u.id === state.user);
+      const rows = state.bookings.filter(b => b.userId === state.user).map(b => `<tr>
+        <td>#${b.id} · ${esc(person.pet)}</td><td>${stamp(slotOf(b).start)}</td><td><span class="status">${status[b.status]}</span><br>${b.reason ? esc(b.reason) : ""}</td>
+        <td>${b.paid ? "已收 ¥99.00" : "未付款"}<br>退款：${refundInfo(b)}</td>
+        <td><div class="actions">${b.status === "PENDING_PAYMENT" ? `<button onclick="pay(${b.id}, 'success')">模拟付款成功</button><button class="secondary" onclick="pay(${b.id}, 'fail')">付款失败</button><button class="secondary" onclick="pay(${b.id}, 'timeout')">渠道超时</button>` : ""}
+        ${b.status === "CONFIRMED" ? `<button class="secondary" onclick="pay(${b.id}, 'success')">重复支付通知</button>` : ""}
+        ${["PENDING_PAYMENT", "CONFIRMED"].includes(b.status) ? `<button class="secondary" onclick="cancelBooking(${b.id})">取消/申请</button>` : ""}
+        ${b.status === "CLOSED" ? `<button class="secondary" onclick="pay(${b.id}, 'success')">模拟迟到支付</button>` : ""}</div></td></tr>`);
+      return `<section><h2>预约洗护</h2><p class="muted">角色和用户切换仅供原型演示；正式系统使用预置账号密码登录，由服务端会话鉴权。</p><div class="formrow">
+        <label>演示用户<select onchange="state.user=Number(this.value);render()">${users.map(u => `<option value="${u.id}" ${u.id === state.user ? "selected" : ""}>${u.name} · ${u.pet}</option>`).join("")}</select></label>
+        <label>本人的宠物<input value="${person.pet}" disabled></label><label>服务时段<select id="book-slot">${slotOptions()}</select></label>
+        <button onclick="book()">提交预约</button></div></section><section><h2>我的预约与结果</h2>${table(rows, ["预约", "时段", "业务结果", "资金状态", "操作"])}</section>`;
+    }
+    function book() {
+      const slot = state.slots.find(s => s.id === Number(document.getElementById("book-slot").value));
+      if (!slot || now() >= slot.start) return notify("预约失败：时段已开始", true);
+      if (state.bookings.some(b => b.userId === state.user && b.slotId === slot.id && !["CLOSED", "CANCELLED"].includes(b.status))) return notify("预约失败：同一宠物已有有效预约", true);
+      if (occupied(slot.id) >= slot.cap) return notify("预约失败：该时段名额不足", true);
+      const b = { id: state.nextBooking++, userId: state.user, slotId: slot.id, status: "PENDING_PAYMENT", expires: addMin(now(), 5), paid: false, refund: "NONE", refundAmount: 0, reason: "" };
+      state.bookings.push(b); notify(`预约 #${b.id} 已占位，5 分钟内付款`); render();
+    }
+    function pay(id, outcome) {
+      const b = bookingOf(id);
+      if (!b || b.userId !== state.user) return notify("付款失败：不是本人的预约", true);
+      if (outcome === "fail") return notify(`预约 #${id} 模拟支付失败，仍待付款`, true);
+      if (outcome === "timeout") return notify(`预约 #${id} 渠道结果超时，仍待核查；不可据此确认`, true);
+      if (b.status === "PENDING_PAYMENT") { b.paid = true; b.status = "CONFIRMED"; notify(`预约 #${id} 已确认，重复通知不得重复记账`); }
+      else if (b.status === "CLOSED" || b.status === "CANCELLED") {
+        if (b.paid) return notify(`重复通知：预约 #${id} 状态和退款记录不变`);
+        b.paid = true; b.refund = "PENDING"; b.refundAmount = 9900; notify(`异常：预约 #${id} 已关闭却收到支付成功，登记异常并待退款`, true);
+      }
+      else return notify(`重复通知：预约 #${id} 状态不变`);
+      render();
+    }
+    function cancelBooking(id) {
+      const b = bookingOf(id), slot = slotOf(b);
+      if (b.userId !== state.user) return notify("取消失败：不是本人的预约", true);
+      if (b.status === "PENDING_PAYMENT") { b.status = "CANCELLED"; notify(`预约 #${id} 未付款取消，名额已释放`); }
+      else if (b.status === "CONFIRMED") {
+        if (slot.start.getTime() - now().getTime() >= 120 * 60000) { b.status = "CANCELLED"; b.refund = "PENDING"; b.refundAmount = 9900; notify(`预约 #${id} 提前取消已受理，待全额退款`); }
+        else { const reason = prompt("距时段开始不足 2 小时或时段已开始，请填写取消原因"); if (!reason?.trim()) return notify("申请失败：取消原因不能为空", true); b.status = "CANCEL_REVIEW"; b.reason = reason.trim(); notify(`预约 #${id} 取消待客服审核，保留名额且不可核销`); }
+      } else return notify("取消失败：当前状态不允许取消", true);
+      render();
+    }
+    function deskView() {
+      const rows = state.bookings.map(b => `<tr><td>#${b.id} · ${users.find(u => u.id === b.userId).pet}</td><td>${stamp(slotOf(b).start)}</td><td>${status[b.status]}</td><td><button onclick="checkIn(${b.id})">核销到店</button></td></tr>`);
+      return `<section><h2>到店接待</h2><div class="formrow"><label>演示员工归属<select onchange="state.staff=this.value"><option value="local">本店前台</option><option value="outside">非本店员工</option></select></label><span class="muted">正式前台需账号密码登录，归属由服务端会话验证。</span></div></section><section>${table(rows, ["预约", "时段", "状态", "操作"])}</section>`;
+    }
+    function checkIn(id) {
+      const b = bookingOf(id);
+      if (state.staff !== "local") return notify("核销失败：员工不属于本店", true);
+      if (b.status !== "CONFIRMED") return notify("核销失败：预约未确认、正在取消审核或已核销", true);
+      const s = slotOf(b);
+      if (now() < addMin(s.start, -30) || now() > s.end) return notify("核销失败：不在开始前 30 分钟至结束的窗口内", true);
+      b.status = "CHECKED_IN"; notify(`预约 #${id} 已核销`); render();
+    }
+    function workerView() {
+      const rows = state.bookings.map(b => `<tr><td>#${b.id} · ${users.find(u => u.id === b.userId).pet}</td><td>${status[b.status]}</td><td><div class="actions"><button onclick="startService(${b.id})">开始服务</button><button class="secondary" onclick="finishService(${b.id})">完成服务</button></div></td></tr>`);
+      return `<section><h2>服务进度</h2><p class="muted">开始必须在核销后且不晚于时段结束；已开始的服务可补登记完成。</p>${table(rows, ["预约", "状态", "操作"])}</section>`;
+    }
+    function startService(id) {
+      const b = bookingOf(id);
+      if (b.status !== "CHECKED_IN" || now() > slotOf(b).end) return notify("开始失败：未核销或时段已结束", true);
+      b.status = "IN_SERVICE"; notify(`预约 #${id} 服务中`); render();
+    }
+    function finishService(id) {
+      const b = bookingOf(id);
+      if (b.status !== "IN_SERVICE") return notify("完成失败：服务未开始或已完成", true);
+      b.status = "COMPLETED"; notify(`预约 #${id} 服务完成；不重复记收入`); render();
+    }
+    function supportView() {
+      const rows = state.bookings.filter(b => b.status === "CANCEL_REVIEW" || ["PENDING", "FAILED"].includes(b.refund)).map(b => `<tr><td>#${b.id} · ${users.find(u => u.id === b.userId).name}</td><td>${status[b.status]}<br>${esc(b.reason)}</td><td>${refundInfo(b)}</td><td><div class="actions">
+        ${b.status === "CANCEL_REVIEW" ? `<button onclick="reviewCancel(${b.id}, true)">批准</button><button class="secondary" onclick="reviewCancel(${b.id}, false)">拒绝</button>` : ""}
+        ${b.refund === "PENDING" ? `<button class="secondary" onclick="refundResult(${b.id}, false)">模拟退款失败</button><button onclick="refundResult(${b.id}, true)">模拟退款成功</button>` : ""}
+        ${b.refund === "FAILED" ? `<button onclick="refundResult(${b.id}, true)">重试成功</button>` : ""}</div></td></tr>`);
+      return `<section><h2>取消审核与退款跟进</h2><p class="muted">开始前不足 2 小时或开始后未核销的取消申请，获批后全额待退 ¥99.00；退款失败仍保留已取消状态。</p>${table(rows, ["预约", "申请及原因", "退款", "处理"])}</section>`;
+    }
+    function reviewCancel(id, approved) {
+      const b = bookingOf(id);
+      if (b.status !== "CANCEL_REVIEW") return notify("审核失败：申请已处理", true);
+      if (approved) { b.status = "CANCELLED"; b.refund = "PENDING"; b.refundAmount = 9900; notify(`预约 #${id} 取消获准，待全额退款 ¥99.00`); }
+      else { b.status = "CONFIRMED"; notify(`预约 #${id} 取消被拒绝，恢复已确认状态`); }
+      render();
+    }
+    function refundResult(id, success) {
+      const b = bookingOf(id);
+      if (!["PENDING", "FAILED"].includes(b.refund)) return notify("退款操作失败：无可处理退款", true);
+      b.refund = success ? "SUCCESS" : "FAILED";
+      notify(`预约 #${id} ${success ? "退款成功" : "退款失败，待跟进"}`, !success); render();
+    }
+    function managerView() {
+      const daySlots = state.slots.filter(s => localInput(s.start).slice(0, 10) === state.day);
+      const dayBookings = state.bookings.filter(b => daySlots.some(s => s.id === b.slotId));
+      const rows = daySlots.map(s => {
+        const all = state.bookings.filter(b => b.slotId === s.id);
+        return `<tr><td>#${s.id}<br>${stamp(s.start)}—${stamp(s.end)}</td><td>${occupied(s.id)}/${s.cap}</td><td>${all.filter(b => b.status === "COMPLETED").length}</td><td>${all.filter(b => b.status === "CANCELLED").length}</td><td>${all.filter(b => b.status === "NO_SHOW").length}</td><td>${all.filter(b => ["PENDING", "FAILED"].includes(b.refund)).length}</td></tr>`;
+      });
+      const paid = dayBookings.filter(b => b.paid).length * 9900;
+      const returned = dayBookings.filter(b => b.refund === "SUCCESS").reduce((total, b) => total + b.refundAmount, 0);
+      const noShow = dayBookings.filter(b => b.status === "CONFIRMED" && now() > slotOf(b).end).map(b => `<tr><td>#${b.id} · ${users.find(u => u.id === b.userId).name}</td><td>${stamp(slotOf(b).end)}</td><td><button onclick="markNoShow(${b.id})">标记未到店</button></td></tr>`);
+      return `<section><h2>发布服务时段（Asia/Shanghai）</h2><div class="formrow"><label>开始<input id="slot-start" type="datetime-local" value="${localInput(addMin(now(), 360))}"></label><label>结束<input id="slot-end" type="datetime-local" value="${localInput(addMin(now(), 420))}"></label><button onclick="publishSlot()">发布（容量 3）</button></div></section>
+        <section><h2>时段与日清预览</h2><div class="formrow"><label>查看日期（Asia/Shanghai）<input type="date" value="${state.day}" onchange="state.day=this.value;render()"></label></div><p class="muted">预约时间和日清按 Asia/Shanghai 业务日期解释；本页仍仅作内存预览。</p>
+        <div class="metrics"><div class="metric">已收款<strong>${money(paid)}</strong></div><div class="metric">已退款<strong>${money(returned)}</strong></div><div class="metric">未退款<strong>${money(paid-returned)}</strong></div><div class="metric">已完成服务<strong>${dayBookings.filter(b=>b.status==="COMPLETED").length}</strong></div></div>
+        ${table(rows, ["时段", "占位", "已完成", "已取消", "未到店", "退款待处理"])}</section><section><h2>时段结束后的未到店</h2>${table(noShow, ["预约", "时段结束", "操作"])}</section>`;
+    }
+    function publishSlot() {
+      const start = parseBusinessInput(document.getElementById("slot-start").value), end = parseBusinessInput(document.getElementById("slot-end").value);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start <= now() || end <= start) return notify("发布失败：起止时间无效或时段已经开始", true);
+      const id = state.nextSlot++;
+      state.slots.push({ id, start, end, cap: 3 }); notify(`时段 #${id} 已发布（原型内存）`); render();
+    }
+    function markNoShow(id) {
+      const b = bookingOf(id);
+      if (b.status !== "CONFIRMED" || now() <= slotOf(b).end) return notify("标记失败：预约未确认或时段未结束", true);
+      const reason = prompt("请输入未到店原因");
+      if (!reason?.trim()) return notify("标记失败：必须填写原因", true);
+      b.status = "NO_SHOW"; b.reason = reason.trim(); notify(`预约 #${id} 已标记未到店，不自动退款`); render();
+    }
+    render();
+  </script>
+</body>
+</html>
