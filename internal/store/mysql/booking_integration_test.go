@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/05xmb/Pet-Appointment/internal/booking"
+	"github.com/05xmb/Pet-Appointment/internal/payment"
 )
 
 func bookingFixture(t *testing.T) (*Store, context.Context, time.Time) {
@@ -78,6 +79,69 @@ func TestBookingTimeoutAndCancelReleaseExactlyOnce(t *testing.T) {
 	}
 	if _, err := store.CreatePending(ctx, 4, 4, 2, now); err != nil {
 		t.Fatalf("cancelled slot was not reusable: %v", err)
+	}
+}
+
+func TestCreatingBookingClosesExpiredPendingCapacity(t *testing.T) {
+	store, ctx, now := bookingFixture(t)
+	for ownerID := int64(1); ownerID <= 3; ownerID++ {
+		if _, err := store.CreatePending(ctx, ownerID, ownerID, 1, now); err != nil {
+			t.Fatalf("owner %d: %v", ownerID, err)
+		}
+	}
+
+	created, err := store.CreatePending(ctx, 4, 4, 1, now.Add(6*time.Minute))
+	if err != nil {
+		t.Fatalf("expired capacity was not released: %v", err)
+	}
+	if created.OwnerID != 4 || created.Status != booking.StatusPendingPayment {
+		t.Fatalf("created=%+v", created)
+	}
+
+	var closed, audits int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM bookings WHERE slot_id = 1 AND status = 'CLOSED'`).Scan(&closed); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_logs WHERE action = 'expired'`).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if closed != 3 || audits != 3 {
+		t.Fatalf("closed=%d audits=%d", closed, audits)
+	}
+}
+
+func TestCompletedBookingStillConsumesSlotCapacity(t *testing.T) {
+	store, ctx, now := bookingFixture(t)
+	var first booking.Booking
+	for ownerID := int64(1); ownerID <= 3; ownerID++ {
+		created, err := store.CreatePending(ctx, ownerID, ownerID, 1, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := store.CreatePayment(ctx, ownerID, created.ID, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ApplyCallback(ctx, payment.Callback{PaymentID: p.ID, BookingID: created.ID, AmountCents: 9900, Outcome: payment.OutcomeSuccess}, now); err != nil {
+			t.Fatal(err)
+		}
+		if ownerID == 1 {
+			first = created
+		}
+	}
+	serviceTime := now.Add(3*time.Hour + 30*time.Minute)
+	if _, _, err := store.CheckIn(ctx, 5, first.ID, serviceTime); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.StartService(ctx, 6, first.ID, serviceTime); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.CompleteService(ctx, 6, first.ID, serviceTime.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.CreatePending(ctx, 4, 4, 1, serviceTime.Add(2*time.Minute)); !errors.Is(err, booking.ErrCapacityFull) {
+		t.Fatalf("completed booking released capacity: %v", err)
 	}
 }
 

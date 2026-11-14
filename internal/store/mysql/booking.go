@@ -26,6 +26,34 @@ func (s *Store) CreatePending(ctx context.Context, ownerID, petID, slotID int64,
 	if !now.Before(slotStart) {
 		return booking.Booking{}, booking.ErrSlotStarted
 	}
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM bookings
+		WHERE slot_id = ? AND status = 'PENDING_PAYMENT' AND expires_at <= ? FOR UPDATE`, slotID, now.UTC())
+	if err != nil {
+		return booking.Booking{}, err
+	}
+	var expiredIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return booking.Booking{}, err
+		}
+		expiredIDs = append(expiredIDs, id)
+	}
+	if err := rows.Close(); err != nil {
+		return booking.Booking{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return booking.Booking{}, err
+	}
+	for _, id := range expiredIDs {
+		if _, err := tx.ExecContext(ctx, `UPDATE bookings SET status = 'CLOSED' WHERE id = ? AND status = 'PENDING_PAYMENT'`, id); err != nil {
+			return booking.Booking{}, err
+		}
+		if err := writeAudit(ctx, tx, 0, "booking", id, "expired", string(booking.StatusPendingPayment), string(booking.StatusClosed), ""); err != nil {
+			return booking.Booking{}, err
+		}
+	}
 
 	var petOwnerID int64
 	if err := tx.QueryRowContext(ctx, `SELECT owner_id FROM pets WHERE id = ? AND store_id = ? FOR UPDATE`, petID, storeID).Scan(&petOwnerID); errors.Is(err, sql.ErrNoRows) {
@@ -47,7 +75,7 @@ func (s *Store) CreatePending(ctx context.Context, ownerID, petID, slotID int64,
 	}
 	var occupied int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM bookings
-		WHERE slot_id = ? AND status IN ('PENDING_PAYMENT', 'CONFIRMED', 'CANCEL_REVIEW', 'CHECKED_IN', 'IN_SERVICE')`, slotID).Scan(&occupied); err != nil {
+		WHERE slot_id = ? AND status IN ('PENDING_PAYMENT', 'CONFIRMED', 'CANCEL_REVIEW', 'CHECKED_IN', 'IN_SERVICE', 'COMPLETED')`, slotID).Scan(&occupied); err != nil {
 		return booking.Booking{}, err
 	}
 	var capacity int
