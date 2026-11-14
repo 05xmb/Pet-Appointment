@@ -114,6 +114,32 @@ func TestLatePaymentAfterClosedBookingCreatesRefundException(t *testing.T) {
 	}
 }
 
+func TestLatePaymentAtExpiredTimestampClosesBookingAndCreatesRefund(t *testing.T) {
+	store, ctx, now, b := paymentFixture(t)
+	p, err := store.CreatePayment(ctx, 1, b.ID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paid, err := store.ApplyCallback(ctx, payment.Callback{PaymentID: p.ID, BookingID: b.ID, Outcome: payment.OutcomeSuccess, AmountCents: 9900}, now.Add(5*time.Minute))
+	if err != nil || paid.Status != payment.StatusSuccess {
+		t.Fatalf("late paid=%+v error=%v", paid, err)
+	}
+
+	var bookingStatus, exceptionStatus, refundStatus string
+	if err := store.db.QueryRowContext(ctx, `SELECT status FROM bookings WHERE id = ?`, b.ID).Scan(&bookingStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.QueryRowContext(ctx, `SELECT status FROM exceptions WHERE payment_id = ? AND type = 'LATE_PAYMENT'`, p.ID).Scan(&exceptionStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.QueryRowContext(ctx, `SELECT status FROM refunds WHERE payment_id = ?`, p.ID).Scan(&refundStatus); err != nil {
+		t.Fatal(err)
+	}
+	if bookingStatus != string(booking.StatusClosed) || exceptionStatus != "NEEDS_REFUND" || refundStatus != "PENDING" {
+		t.Fatalf("booking=%s exception=%s refund=%s", bookingStatus, exceptionStatus, refundStatus)
+	}
+}
+
 func TestPaymentAfterUnpaidExpiryClosesBookingAndIsRejected(t *testing.T) {
 	store, ctx, now, b := paymentFixture(t)
 	if _, err := store.CreatePayment(ctx, 1, b.ID, now.Add(5*time.Minute)); !errors.Is(err, payment.ErrBookingNotPayable) {

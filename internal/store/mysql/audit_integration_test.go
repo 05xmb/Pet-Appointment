@@ -2,12 +2,38 @@ package mysqlstore
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/05xmb/Pet-Appointment/internal/booking"
 	"github.com/05xmb/Pet-Appointment/internal/payment"
 )
+
+func TestCancellationRequestAuditFailureReleasesTransactionConnection(t *testing.T) {
+	store, ctx, now, b, _ := paidBookingFixture(t)
+	store.db.SetMaxOpenConns(1)
+	if _, err := store.db.ExecContext(ctx, `DROP TABLE audit_logs`); err != nil {
+		t.Fatal(err)
+	}
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	defer cancelRequest()
+	if _, err := store.RequestCancellation(requestCtx, 1, b.ID, "行程变化", now.Add(3*time.Hour)); err == nil {
+		t.Fatal("request succeeded without audit log")
+	}
+
+	queryCtx, cancelQuery := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancelQuery()
+	var one int
+	err := store.db.QueryRowContext(queryCtx, `SELECT 1`).Scan(&one)
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, sql.ErrConnDone) {
+		t.Fatalf("transaction connection was not released: %v", err)
+	}
+	if err != nil || one != 1 {
+		t.Fatalf("query result=%d error=%v", one, err)
+	}
+}
 
 func TestSlotCreationWritesAuditLogInSameTransaction(t *testing.T) {
 	db, _ := testDatabase(t)

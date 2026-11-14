@@ -90,11 +90,12 @@ func (s *Store) ApplyCallback(ctx context.Context, callback payment.Callback, no
 	defer tx.Rollback()
 	var result payment.Payment
 	var bookingStatus string
+	var expiresAt time.Time
 	err = tx.QueryRowContext(ctx, `SELECT p.id, p.booking_id, p.owner_id, p.amount_cents, p.status,
-		p.created_at, p.updated_at, b.status FROM payments p JOIN bookings b ON b.id = p.booking_id
+		p.created_at, p.updated_at, b.status, b.expires_at FROM payments p JOIN bookings b ON b.id = p.booking_id
 		WHERE p.id = ? FOR UPDATE`, callback.PaymentID).Scan(
 		&result.ID, &result.BookingID, &result.OwnerID, &result.AmountCents, &result.Status,
-		&result.CreatedAt, &result.UpdatedAt, &bookingStatus,
+		&result.CreatedAt, &result.UpdatedAt, &bookingStatus, &expiresAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return payment.Payment{}, payment.ErrPaymentNotFound
@@ -124,7 +125,7 @@ func (s *Store) ApplyCallback(ctx context.Context, callback payment.Callback, no
 	if err := writeAudit(ctx, tx, 0, "payment", result.ID, "callback", string(payment.StatusPending), string(newStatus), string(callback.Outcome)); err != nil {
 		return payment.Payment{}, err
 	}
-	if callback.Outcome == payment.OutcomeSuccess && bookingStatus == string(booking.StatusPendingPayment) {
+	if callback.Outcome == payment.OutcomeSuccess && bookingStatus == string(booking.StatusPendingPayment) && now.Before(expiresAt) {
 		if _, err := tx.ExecContext(ctx, `UPDATE bookings SET status = 'CONFIRMED' WHERE id = ? AND status = 'PENDING_PAYMENT'`, callback.BookingID); err != nil {
 			return payment.Payment{}, err
 		}
@@ -132,6 +133,15 @@ func (s *Store) ApplyCallback(ctx context.Context, callback payment.Callback, no
 			return payment.Payment{}, err
 		}
 	} else if callback.Outcome == payment.OutcomeSuccess {
+		if bookingStatus == string(booking.StatusPendingPayment) {
+			if _, err := tx.ExecContext(ctx, `UPDATE bookings SET status = 'CLOSED' WHERE id = ? AND status = 'PENDING_PAYMENT'`, callback.BookingID); err != nil {
+				return payment.Payment{}, err
+			}
+			if err := writeAudit(ctx, tx, 0, "booking", callback.BookingID, "expired", bookingStatus, string(booking.StatusClosed), "payment callback arrived after expiry"); err != nil {
+				return payment.Payment{}, err
+			}
+			bookingStatus = string(booking.StatusClosed)
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO exceptions (payment_id, booking_id, type, status, amount_cents, detail)
 			VALUES (?, ?, 'LATE_PAYMENT', 'NEEDS_REFUND', ?, '支付成功时预约已关闭或取消')
 			ON DUPLICATE KEY UPDATE payment_id = payment_id`, callback.PaymentID, callback.BookingID, callback.AmountCents); err != nil {
@@ -147,6 +157,5 @@ func (s *Store) ApplyCallback(ctx context.Context, callback payment.Callback, no
 	if err := tx.Commit(); err != nil {
 		return payment.Payment{}, err
 	}
-	_ = now
 	return result, nil
 }

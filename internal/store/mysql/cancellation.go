@@ -55,10 +55,10 @@ func (s *Store) RequestCancellation(ctx context.Context, ownerID, bookingID int6
 	if err != nil {
 		return cancellation.Request{}, err
 	}
+	defer tx.Rollback()
 	if err := writeAudit(ctx, tx, ownerID, "booking", bookingID, "cancellation_requested", string(booking.StatusConfirmed), string(booking.StatusCancelReview), reason); err != nil {
 		return cancellation.Request{}, err
 	}
-	defer tx.Rollback()
 	var status string
 	var bookingOwner int64
 	var start time.Time
